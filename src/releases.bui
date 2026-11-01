@@ -1,0 +1,648 @@
+' Offline SDK release catalog and image matrix. No subprocesses or network calls.
+
+Function Exact(left As String, right As String) As Boolean
+    Return String.Compare(left, right, True) = 0
+End Function
+
+Sub Need(passed As Boolean, message As String)
+    If Not passed Then Throw New InvalidArgumentException(message)
+End Sub
+
+Function Text(item As JSONItem, key As String) As String
+    Dim value As JSONItem = item.Value(key)
+    Need(value.IsString(), "expected string: " + key)
+    Return value.AsString().Value
+End Function
+
+Function Flag(item As JSONItem, key As String) As Boolean
+    Need(item.Value(key).IsBoolean(), "expected boolean: " + key)
+    Return item.Value(key).AsBoolean().Value
+End Function
+
+Function IntegerValue(value As JSONItem, description As String) As Integer
+    Need(value.IsNumber(), "expected nonnegative integer: " + description)
+    Dim number As Double = value.AsNumber().Value
+    Need(number >= 0 And number <= 9007199254740991.0 And Math.Floor(number) = number, "invalid integer: " + description)
+    Return number
+End Function
+
+Function Contains(items As Array Of String, value As String) As Boolean
+    For Each item As String In items
+        If Exact(item, value) Then Return True
+    Next
+    Return False
+End Function
+
+Function ReadInput(filename As String) As String
+    If Exact(filename, "-") Then
+        Dim source As String = ""
+        Do
+            Dim line As Optional Of String = StdIn.ReadLine()
+            If Not line.HasValue Then Exit Do
+            source += line.Value + "\n"
+            Need(String.Len(source) <= 67108864, "input exceeds 64 MiB")
+        Loop
+        Return source
+    End If
+    Dim file As New FileSystemItem(filename)
+    Need(file.IsFile() And file.Length() <= 67108864, "input missing or exceeds 64 MiB: " + filename)
+    Dim readback As Result Of String, String = file.ReadAllText()
+    Need(readback.IsOk, "cannot read " + filename)
+    Return readback.Value
+End Function
+
+Sub Emit(value As JSONItem, output As String)
+    Dim options As New JSONOptions()
+    options.Compact = False
+    options.IndentSpacing = 2
+    Dim source As String = Json.Stringify(value, options) + "\n"
+    If output = "" Or Exact(output, "-") Then
+        StdOut.Write(source)
+    Else
+        Dim file As New FileSystemItem(output)
+        Dim parent As FileSystemItem = file.Parent
+        If parent <> Nil Then Need(parent.CreateFolder(True), "cannot create output directory")
+        Dim written As Result Of Integer, String = file.WriteAllText(source)
+        Need(written.IsOk, "cannot write " + output)
+    End If
+End Sub
+
+Function Segment(value As String) As String
+    Dim bytes As Bytes = Bytes.FromString(value, Text.Encodings.UTF8)
+    Dim encoded As String = ""
+    Dim hex As String = "0123456789ABCDEF"
+    For index As Integer = 0 To bytes.Count - 1
+        Dim number As Integer = bytes.Item(index)
+        If (number >= 65 And number <= 90) Or (number >= 97 And number <= 122) Or (number >= 48 And number <= 57) Or number = 45 Or number = 46 Or number = 95 Or number = 126 Then
+            encoded += String.Chr(number)
+        Else
+            encoded += "%" + String.Substring(hex, number \ 16, 1) + String.Substring(hex, number Mod 16, 1)
+        End If
+    Next
+    Return encoded
+End Function
+
+Sub Repository(value As String)
+    Dim parts As Array Of String = String.Split(value, "/")
+    Need(Array.Count(parts) = 2, "repository must be OWNER/REPO")
+    For Each part As String In parts
+        Need(part <> "" And part <> "." And part <> "..", "invalid repository")
+        For Each ch As String In String.Chars(part)
+            Need(String.Contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-", ch, True), "invalid repository character")
+        Next
+    Next
+End Sub
+
+Function ImageTag(value As String) As String
+    Dim tag As String = ""
+    For Each ch As String In String.Chars(String.LCase(value))
+        If String.Contains("abcdefghijklmnopqrstuvwxyz0123456789_.-", ch, True) Then
+            tag += ch
+        Else
+            tag += "-"
+        End If
+    Next
+    Need(tag <> "" And String.Len(tag) <= 90, "release image tag is empty or too long")
+    If Not String.Contains("abcdefghijklmnopqrstuvwxyz0123456789_", String.Substring(tag, 0, 1), True) Then tag = "release-" + tag
+    Return tag
+End Function
+
+Function NumericPart(value As String) As Boolean
+    If value = "" Then Return False
+    If String.Len(value) > 1 And String.StartsWith(value, "0", True) Then Return False
+    For Each ch As String In String.Chars(value)
+        If Not String.Contains("0123456789", ch, True) Then Return False
+    Next
+    Return True
+End Function
+
+Function Identifiers(value As String, prerelease As Boolean) As Boolean
+    If value = "" Then Return False
+    For Each part As String In String.Split(value, ".")
+        If part = "" Then Return False
+        Dim numeric As Boolean = True
+        For Each ch As String In String.Chars(part)
+            If Not String.Contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-", ch, True) Then Return False
+            If Not String.Contains("0123456789", ch, True) Then numeric = False
+        Next
+        If prerelease And numeric And Not NumericPart(part) Then Return False
+    Next
+    Return True
+End Function
+
+Function Version(tag As String) As JSONItem
+    If Not String.StartsWith(tag, "buoy-v", True) Then Return JSONItem.Null()
+    Dim versionText As String = String.Substring(tag, 6)
+    Dim builds As Array Of String = String.Split(versionText, "+")
+    If Array.Count(builds) > 2 Then Return JSONItem.Null()
+    If Array.Count(builds) = 2 Then
+        If Not Identifiers(builds(1), False) Then Return JSONItem.Null()
+    End If
+    Dim core As String = builds(0)
+    Dim separator As Integer = String.IndexOf(core, "-", 0, True)
+    If separator >= 0 Then
+        If Not Identifiers(String.Substring(core, separator + 1), True) Then Return JSONItem.Null()
+        core = String.Substring(core, 0, separator)
+    End If
+    Dim parts As Array Of String = String.Split(core, ".")
+    If Array.Count(parts) <> 3 Then Return JSONItem.Null()
+    For Each part As String In parts
+        If Not NumericPart(part) Then Return JSONItem.Null()
+    Next
+    For Each ch As String In String.Chars(versionText)
+        If Not String.Contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-+", ch, True) Then Return JSONItem.Null()
+    Next
+    Return JSONItem.From(versionText)
+End Function
+
+Function Format(name As String) As String
+    For Each suffix As String In ["deb", "rpm", "pkg", "dmg", "exe", "zip", "tar.gz", "tar.xz"]
+        If String.EndsWith(String.LCase(name), "." + suffix, True) Then Return suffix
+    Next
+    Return "unknown"
+End Function
+
+Function OperatingSystem(name As String, assetFormat As String) As String
+    Dim lowered As String = String.LCase(name)
+    If String.Contains(lowered, "linux", True) Or Exact(assetFormat, "deb") Or Exact(assetFormat, "rpm") Then Return "linux"
+    If String.Contains(lowered, "windows", True) Or Exact(assetFormat, "exe") Then Return "windows"
+    If String.Contains(lowered, "macos", True) Or Exact(assetFormat, "pkg") Or Exact(assetFormat, "dmg") Then Return "macos"
+    Return "unknown"
+End Function
+
+Function Architecture(name As String) As String
+    Dim lowered As String = String.LCase(name)
+    If String.Contains(lowered, "arm64", True) Or String.Contains(lowered, "aarch64", True) Then Return "arm64"
+    If String.Contains(lowered, "amd64", True) Or String.Contains(lowered, "x86_64", True) Then Return "amd64"
+    Return "unknown"
+End Function
+
+Function AssetsSort(items As JSONItem) As JSONItem
+    For index As Integer = 1 To items.Count() - 1
+        Dim selected As JSONItem = items.ValueAt(index)
+        Dim position As Integer = index
+        While position > 0
+            If String.Compare(Text(items.ValueAt(position - 1), "name"), Text(selected, "name"), True) <= 0 Then Exit While
+            items.ValueAt(position) = items.ValueAt(position - 1)
+            position -= 1
+        End While
+        items.ValueAt(position) = selected
+    Next
+    Return items
+End Function
+
+Function ReleaseKey(item As JSONItem) As String
+    Dim date As String = ""
+    If item.Value("publishedAt").IsString() Then date = Text(item, "publishedAt")
+    Return date + "\t" + Text(item, "release")
+End Function
+
+Sub Published(value As JSONItem, draft As Boolean)
+    If value.IsNull() Then
+        Need(draft, "published release must identify published_at")
+        Return
+    End If
+    Need(value.IsString(), "published_at must be ISO UTC string or null for a draft")
+    Dim stamp As String = value.AsString().Value
+    Need(String.Len(stamp) = 20 And Exact(String.Substring(stamp, 4, 1), "-") And Exact(String.Substring(stamp, 7, 1), "-") And Exact(String.Substring(stamp, 10, 1), "T") And Exact(String.Substring(stamp, 13, 1), ":") And Exact(String.Substring(stamp, 16, 1), ":") And Exact(String.Substring(stamp, 19, 1), "Z"), "published_at must use GitHub ISO UTC timestamp spelling")
+    Dim moment As DateTime = DateTime.FromComponents(CountArgument(String.Substring(stamp, 0, 4)), CountArgument(String.Substring(stamp, 5, 2)), CountArgument(String.Substring(stamp, 8, 2)), CountArgument(String.Substring(stamp, 11, 2)), CountArgument(String.Substring(stamp, 14, 2)), CountArgument(String.Substring(stamp, 17, 2)))
+    Need(Exact(String.Substring(moment.ToIso8601(), 0, 19), String.Substring(stamp, 0, 19)), "published_at contains an invalid calendar date/time")
+End Sub
+
+Sub SortReleases(items As JSONItem)
+    For index As Integer = 1 To items.Count() - 1
+        Dim selected As JSONItem = items.ValueAt(index)
+        Dim position As Integer = index
+        While position > 0
+            If String.Compare(ReleaseKey(items.ValueAt(position - 1)), ReleaseKey(selected), True) <= 0 Then Exit While
+            items.ValueAt(position) = items.ValueAt(position - 1)
+            position -= 1
+        End While
+        items.ValueAt(position) = selected
+    Next
+End Sub
+
+Function NormalizeAsset(asset As JSONItem, releaseTag As String, repositoryName As String) As JSONItem
+    Need(asset.IsObject(), "asset must be an object")
+    Dim name As String = Text(asset, "name")
+    Need(name <> "" And name <> "." And name <> ".." And Not String.Contains(name, "/", True) And Not String.Contains(name, "\\", True), "invalid asset filename")
+    Dim nameBytes As Bytes = Bytes.FromString(name, Text.Encodings.UTF8)
+    For index As Integer = 0 To nameBytes.Count - 1
+        Need(nameBytes.Item(index) >= 32 And nameBytes.Item(index) <> 127, "asset filename has control characters")
+    Next
+    Dim url As String = Text(asset, "browser_download_url")
+    Need(Exact(url, "https://github.com/" + repositoryName + "/releases/download/" + Segment(releaseTag) + "/" + Segment(name)), "asset URL does not match configured official repository, release and filename: " + url)
+    Dim digest As String = Text(asset, "digest")
+    Need(String.StartsWith(digest, "sha256:", True) And String.Len(digest) = 71, "asset must have GitHub SHA-256 digest: " + name)
+    Dim sha As String = String.Substring(digest, 7)
+    For Each ch As String In String.Chars(sha)
+        Need(String.Contains("0123456789abcdef", ch, True), "invalid lowercase SHA-256: " + name)
+    Next
+    Dim size As Integer = IntegerValue(asset.Value("size"), "asset size")
+    Need(size > 0, "empty release asset: " + name)
+    Dim normalized As JSONItem = JSONItem.NewObject()
+    normalized.Value("name") = name
+    normalized.Value("url") = url
+    normalized.Value("sha256") = sha
+    normalized.Value("size") = size
+    Dim assetFormat As String = Format(name)
+    normalized.Value("format") = assetFormat
+    normalized.Value("os") = OperatingSystem(name, assetFormat)
+    normalized.Value("arch") = Architecture(name)
+    normalized.Value("classification") = "filename-derived"
+    Return normalized
+End Function
+
+Function SdkRank(asset As JSONItem) As Integer
+    Dim rank As Integer = 1000
+    Dim os As String = Text(asset, "os")
+    Dim assetFormat As String = Text(asset, "format")
+    If Exact(os, "linux") Then rank = 0
+    If Exact(os, "macos") Then rank = 100
+    If Exact(os, "windows") Then rank = 200
+    Dim formatRank As Integer = 50
+    If Exact(assetFormat, "deb") Or Exact(assetFormat, "pkg") Or Exact(assetFormat, "exe") Then formatRank = 0
+    If Exact(assetFormat, "rpm") Then formatRank = 10
+    If Exact(assetFormat, "zip") Then formatRank = 20
+    If Exact(assetFormat, "dmg") Then formatRank = 30
+    rank += formatRank
+    If Exact(Text(asset, "arch"), "unknown") Then rank += 5
+    If Exact(os, "linux") And Exact(Text(asset, "arch"), "arm64") Then rank += 1
+    If Exact(os, "macos") And Exact(Text(asset, "arch"), "amd64") Then rank += 1
+    If Exact(os, "windows") And Exact(Text(asset, "arch"), "arm64") Then rank += 1
+    Return rank
+End Function
+
+Class Inputs
+    Public Property Releases As JSONItem = JSONItem.NewArray()
+    Public Property PageCounts As Array Of Integer = []
+End Class
+
+Sub AddChunk(inputs As Inputs, value As JSONItem)
+    If value.IsArray() Then
+        If value.Count() > 0 And value.ValueAt(0).IsArray() Then
+            For index As Integer = 0 To value.Count() - 1
+                Need(value.ValueAt(index).IsArray(), "mixed paginated API array")
+                AddChunk(inputs, value.ValueAt(index))
+            Next
+        Else
+            Array.Append(inputs.PageCounts, value.Count())
+            For index As Integer = 0 To value.Count() - 1
+                Need(value.ValueAt(index).IsObject(), "API release must be an object")
+                inputs.Releases.Add(value.ValueAt(index))
+            Next
+        End If
+    Else
+        Need(value.IsObject(), "expected release object or GitHub API page array")
+        inputs.Releases.Add(value)
+    End If
+End Sub
+
+Function ParseInputs(source As String) As Inputs
+    Dim inputs As New Inputs
+    Dim whole As Optional Of JSONItem = Json.TryParse(source)
+    If whole.HasValue Then
+        AddChunk(inputs, whole.Value)
+    Else
+        Dim chunks As Integer = 0
+        For Each line As String In String.Split(source, "\n")
+            If String.Trim(line) = "" Then Continue For
+            AddChunk(inputs, Json.Parse(line))
+            chunks += 1
+        Next
+        Need(chunks > 0, "input contains no JSON release records or API pages")
+    End If
+    Return inputs
+End Function
+
+Function Normalize(inputs As Inputs, repositoryName As String, expected As Integer, expectedPages As Integer, pageSize As Integer) As JSONItem
+    Repository(repositoryName)
+    If Array.Count(inputs.PageCounts) > 0 Then
+        Dim total As Integer = 0
+        For Each count As Integer In inputs.PageCounts
+            total += count
+        Next
+        Need(total = inputs.Releases.Count(), "cannot mix API page arrays and standalone release records")
+    End If
+    If expected >= 0 Then Need(inputs.Releases.Count() = expected, "release count differs from --expect-releases")
+    If expectedPages >= 0 Then Need(Array.Count(inputs.PageCounts) = expectedPages, "API page count differs from --expect-pages")
+    If pageSize > 0 Then
+        Need(Array.Count(inputs.PageCounts) > 0, "--page-size requires API page arrays, not flattened release JSONL")
+        For index As Integer = 0 To Array.Count(inputs.PageCounts) - 1
+            If index < Array.Count(inputs.PageCounts) - 1 Then
+                Need(inputs.PageCounts(index) = pageSize, "nonterminal API page is short or oversized")
+            Else
+                Need(inputs.PageCounts(index) < pageSize, "last API page is full; fetch the next page to prove termination")
+            End If
+        Next
+    End If
+    Dim releases As JSONItem = JSONItem.NewArray()
+    Dim tags As Array Of String = []
+    Dim imageTags As Array Of String = []
+    Dim urls As Array Of String = []
+    Dim assetCount As Integer = 0
+    For index As Integer = 0 To inputs.Releases.Count() - 1
+        Dim raw As JSONItem = inputs.Releases.ValueAt(index)
+        Dim tag As String = Text(raw, "tag_name")
+        Need(tag <> "" And tag <> "." And tag <> ".." And Not Contains(tags, tag), "empty, unsafe or duplicate release tag: " + tag)
+        Array.Append(tags, tag)
+        Dim safeTag As String = ImageTag(tag)
+        Need(Not Contains(imageTags, safeTag), "sanitized release image-tag collision: " + safeTag)
+        Array.Append(imageTags, safeTag)
+        If raw.Value("html_url").IsString() Then Need(Exact(Text(raw, "html_url"), "https://github.com/" + repositoryName + "/releases/tag/" + Segment(tag)), "release html_url source origin mismatch")
+        Dim release As JSONItem = JSONItem.NewObject()
+        release.Value("release") = tag
+        release.Value("version") = Version(tag)
+        release.Value("imageTag") = safeTag
+        Published(raw.Value("published_at"), Flag(raw, "draft"))
+        release.Value("publishedAt") = raw.Value("published_at")
+        release.Value("draft") = Flag(raw, "draft")
+        release.Value("prerelease") = Flag(raw, "prerelease")
+        Dim rawAssets As JSONItem = raw.Value("assets")
+        Need(rawAssets.IsArray(), "release assets must be an array: " + tag)
+        Dim assets As JSONItem = JSONItem.NewArray()
+        Dim names As Array Of String = []
+        For assetIndex As Integer = 0 To rawAssets.Count() - 1
+            Dim asset As JSONItem = NormalizeAsset(rawAssets.ValueAt(assetIndex), tag, repositoryName)
+            Need(Not Contains(names, Text(asset, "name")), "duplicate asset name in " + tag)
+            Need(Not Contains(urls, Text(asset, "url")), "duplicate asset URL")
+            Array.Append(names, Text(asset, "name"))
+            Array.Append(urls, Text(asset, "url"))
+            assets.Add(asset)
+            assetCount += 1
+        Next
+        assets = AssetsSort(assets)
+        Dim linux As JSONItem = JSONItem.NewObject()
+        Dim sdk As String = ""
+        Dim best As Integer = 1000000
+        For assetIndex As Integer = 0 To assets.Count() - 1
+            Dim asset As JSONItem = assets.ValueAt(assetIndex)
+            Dim rank As Integer = SdkRank(asset)
+            If rank < best Then
+                best = rank
+                sdk = Text(asset, "name")
+            End If
+            If Exact(Text(asset, "os"), "linux") And Exact(Text(asset, "format"), "deb") And Contains(["amd64", "arm64"], Text(asset, "arch")) Then
+                If Not linux.HasKey(Text(asset, "arch")) Then linux.Value(Text(asset, "arch")) = Text(asset, "name")
+            End If
+        Next
+        release.Value("assets") = assets
+        release.Value("preferredLinux") = linux
+        release.Value("preferredSdk") = sdk
+        release.Value("linuxCompilerAvailable") = linux.Count() > 0
+        releases.Add(release)
+    Next
+    SortReleases(releases)
+    Dim source As JSONItem = JSONItem.NewObject()
+    source.Value("repository") = repositoryName
+    source.Value("api") = "https://api.github.com/repos/" + repositoryName + "/releases"
+    source.Value("releaseCount") = releases.Count()
+    source.Value("assetCount") = assetCount
+    source.Value("expectedReleaseCount") = JSONItem.Null()
+    If expected >= 0 Then source.Value("expectedReleaseCount") = expected
+    source.Value("countVerified") = expected >= 0
+    Dim pageCounts As JSONItem = JSONItem.NewArray()
+    For Each count As Integer In inputs.PageCounts
+        pageCounts.Add(count)
+    Next
+    source.Value("pageCounts") = pageCounts
+    source.Value("paginationVerified") = pageSize > 0
+    source.Value("pageSize") = pageSize
+    source.Value("expectedPages") = JSONItem.Null()
+    If expectedPages >= 0 Then source.Value("expectedPages") = expectedPages
+    Dim catalog As JSONItem = JSONItem.NewObject()
+    catalog.Value("schema") = 1
+    catalog.Value("source") = source
+    catalog.Value("releases") = releases
+    Return catalog
+End Function
+
+Function Verify(catalog As JSONItem, expected As Integer) As JSONItem
+    Need(IntegerValue(catalog.Value("schema"), "schema") = 1, "catalog schema must be 1")
+    Dim source As JSONItem = catalog.Value("source")
+    Dim repositoryName As String = Text(source, "repository")
+    Repository(repositoryName)
+    Need(Exact(Text(source, "api"), "https://api.github.com/repos/" + repositoryName + "/releases"), "catalog API source origin mismatch")
+    Dim entries As JSONItem = catalog.Value("releases")
+    Need(entries.IsArray(), "catalog releases must be an array")
+    Dim inputs As New Inputs
+    For index As Integer = 0 To entries.Count() - 1
+        Dim entry As JSONItem = entries.ValueAt(index)
+        Dim raw As JSONItem = JSONItem.NewObject()
+        raw.Value("tag_name") = Text(entry, "release")
+        raw.Value("published_at") = entry.Value("publishedAt")
+        raw.Value("draft") = Flag(entry, "draft")
+        raw.Value("prerelease") = Flag(entry, "prerelease")
+        Dim assets As JSONItem = JSONItem.NewArray()
+        Need(entry.Value("assets").IsArray(), "catalog assets must be an array")
+        For position As Integer = 0 To entry.Value("assets").Count() - 1
+            Dim asset As JSONItem = entry.Value("assets").ValueAt(position)
+            Dim converted As JSONItem = JSONItem.NewObject()
+            converted.Value("name") = Text(asset, "name")
+            converted.Value("browser_download_url") = Text(asset, "url")
+            converted.Value("digest") = "sha256:" + Text(asset, "sha256")
+            converted.Value("size") = asset.Value("size")
+            assets.Add(converted)
+        Next
+        raw.Value("assets") = assets
+        inputs.Releases.Add(raw)
+    Next
+    Dim canonical As JSONItem = Normalize(inputs, repositoryName, expected, -1, 0)
+    Need(IntegerValue(source.Value("releaseCount"), "source releaseCount") = entries.Count(), "catalog release count mismatch")
+    Need(IntegerValue(source.Value("assetCount"), "source assetCount") = IntegerValue(canonical.Value("source").Value("assetCount"), "canonical assetCount"), "catalog asset count mismatch")
+    If Flag(source, "countVerified") Then Need(IntegerValue(source.Value("expectedReleaseCount"), "expectedReleaseCount") = entries.Count(), "recorded expected release count mismatch")
+    Need(source.Value("pageCounts").IsArray(), "pageCounts must be an array")
+    Dim pageTotal As Integer = 0
+    For index As Integer = 0 To source.Value("pageCounts").Count() - 1
+        pageTotal += IntegerValue(source.Value("pageCounts").ValueAt(index), "page count")
+    Next
+    If source.Value("pageCounts").Count() > 0 Then Need(pageTotal = entries.Count(), "pagination sum differs from release count")
+    If Flag(source, "paginationVerified") Then
+        Dim size As Integer = IntegerValue(source.Value("pageSize"), "pageSize")
+        Need(size > 0 And source.Value("pageCounts").Count() > 0, "invalid pagination receipt")
+        For index As Integer = 0 To source.Value("pageCounts").Count() - 1
+            Dim count As Integer = IntegerValue(source.Value("pageCounts").ValueAt(index), "page count")
+            If index < source.Value("pageCounts").Count() - 1 Then
+                Need(count = size, "short nonterminal catalog page")
+            Else
+                Need(count < size, "catalog final page does not prove termination")
+            End If
+        Next
+    End If
+    If Not source.Value("expectedPages").IsNull() Then Need(IntegerValue(source.Value("expectedPages"), "expectedPages") = source.Value("pageCounts").Count(), "catalog expected page count mismatch")
+    For index As Integer = 0 To entries.Count() - 1
+        Dim entry As JSONItem = entries.ValueAt(index)
+        Dim normalized As JSONItem = canonical.Value("releases").ValueAt(index)
+        For Each field As String In ["release", "imageTag", "preferredSdk"]
+            Need(Exact(Text(entry, field), Text(normalized, field)), "noncanonical release order/selection/tag: " + field)
+        Next
+        Need(Exact(Json.Stringify(entry.Value("version")), Json.Stringify(normalized.Value("version"))), "noncanonical release version")
+        Need(Flag(entry, "linuxCompilerAvailable") = Flag(normalized, "linuxCompilerAvailable"), "Linux availability mismatch")
+        Need(entry.Value("preferredLinux").IsObject() And entry.Value("preferredLinux").Count() = normalized.Value("preferredLinux").Count(), "Linux selection count mismatch")
+        For Each arch As String In normalized.Value("preferredLinux").Keys()
+            Need(Exact(Text(entry.Value("preferredLinux"), arch), Text(normalized.Value("preferredLinux"), arch)), "Linux preferred asset mismatch")
+        Next
+        For position As Integer = 0 To entry.Value("assets").Count() - 1
+            Dim asset As JSONItem = entry.Value("assets").ValueAt(position)
+            Dim actual As JSONItem = normalized.Value("assets").ValueAt(position)
+            For Each field As String In ["name", "url", "sha256", "os", "arch", "format", "classification"]
+                Need(Exact(Text(asset, field), Text(actual, field)), "asset classification/order mismatch: " + field)
+            Next
+        Next
+    Next
+    Return catalog
+End Function
+
+Function Matrix(catalog As JSONItem, profile As String, allAssets As Boolean) As JSONItem
+    Need(Contains(["compiler", "sdk"], profile), "matrix profile must be compiler or sdk")
+    Need(Not allAssets Or Exact(profile, "sdk"), "--all-assets is only supported for SDK carriers")
+    Dim matrix As JSONItem = JSONItem.NewObject()
+    matrix.Value("schema") = 1
+    matrix.Value("repository") = Text(catalog.Value("source"), "repository")
+    matrix.Value("kind") = profile
+    Dim rows As JSONItem = JSONItem.NewArray()
+    Dim excluded As JSONItem = JSONItem.NewArray()
+    Dim usedTags As Array Of String = []
+    Dim eligible As Integer = 0
+    For index As Integer = 0 To catalog.Value("releases").Count() - 1
+        Dim release As JSONItem = catalog.Value("releases").ValueAt(index)
+        Dim selected As Integer = 0
+        Dim assets As JSONItem = release.Value("assets")
+        For position As Integer = 0 To assets.Count() - 1
+            Dim asset As JSONItem = assets.ValueAt(position)
+            Dim useAsset As Boolean = allAssets Or Exact(Text(asset, "name"), Text(release, "preferredSdk"))
+            If Exact(profile, "compiler") Then
+                useAsset = Exact(Text(asset, "os"), "linux") And Exact(Text(asset, "format"), "deb") And Contains(["amd64", "arm64"], Text(asset, "arch"))
+                If useAsset Then useAsset = Exact(Text(asset, "name"), Text(release.Value("preferredLinux"), Text(asset, "arch")))
+            End If
+            If Not useAsset Then Continue For
+            Dim row As JSONItem = JSONItem.NewObject()
+            row.Value("release") = Text(release, "release")
+            row.Value("version") = release.Value("version")
+            For Each field As String In ["os", "arch", "format", "url", "sha256"]
+                row.Value(field) = Text(asset, field)
+            Next
+            row.Value("asset") = Text(asset, "name")
+            row.Value("size") = asset.Value("size")
+            Dim tag As String = Text(release, "imageTag") + "-sdk"
+            row.Value("profile") = "sdk-artifact"
+            row.Value("runnableCompiler") = False
+            row.Value("reason") = "opaque verified SDK carrier; no native compiler execution implied"
+            If allAssets Then tag += "-" + String.From(position + 1)
+            If Exact(profile, "compiler") Then
+                tag = Text(release, "imageTag") + "-linux-" + Text(asset, "arch")
+                row.Value("profile") = "linux-compiler"
+                row.Value("platform") = "linux/" + Text(asset, "arch")
+                row.Value("runnableCompiler") = True
+                row.Value("reason") = "official Linux Debian artifact; image build and native execution still require verification"
+            End If
+            Need(String.Len(tag) <= 128 And Not Contains(usedTags, tag), "matrix image-tag collision or length overflow: " + tag)
+            Array.Append(usedTags, tag)
+            row.Value("imageTag") = tag
+            rows.Add(row)
+            selected += 1
+        Next
+        If selected > 0 Then
+            eligible += 1
+        Else
+            Dim missing As JSONItem = JSONItem.NewObject()
+            missing.Value("release") = Text(release, "release")
+            missing.Value("reason") = "no supported Linux Debian asset; catalog retains all actual SDK assets"
+            If Exact(profile, "sdk") Then missing.Value("reason") = "release publishes no downloadable SDK asset; no carrier fabricated"
+            excluded.Add(missing)
+        End If
+    Next
+    matrix.Value("rows") = rows
+    Dim coverage As JSONItem = JSONItem.NewObject()
+    coverage.Value("catalogReleases") = catalog.Value("releases").Count()
+    coverage.Value("catalogAssets") = catalog.Value("source").Value("assetCount")
+    coverage.Value("eligibleReleases") = eligible
+    coverage.Value("plannedImages") = rows.Count()
+    coverage.Value("builtImages") = JSONItem.Null()
+    coverage.Value("nativeExecutionVerified") = False
+    coverage.Value("excluded") = excluded
+    matrix.Value("coverage") = coverage
+    Return matrix
+End Function
+
+Function CountArgument(value As String) As Integer
+    Need(value <> "", "expected nonnegative count")
+    Dim count As Integer = 0
+    For Each ch As String In String.Chars(value)
+        Dim digit As Integer = String.IndexOf("0123456789", ch, 0, True)
+        Need(digit >= 0 And count <= 1000000, "invalid or excessive count")
+        count = count * 10 + digit
+    Next
+    Return count
+End Function
+
+Function Main(args As Array Of String) As Integer
+    Try
+        Need(Array.Count(args) >= 2, "use --help")
+        If Exact(args(1), "--help") Then
+            Print "buoy-releases ingest INPUT|- [--repository OWNER/REPO] [--expect-releases N] [--expect-pages N --page-size N] [--output FILE]"
+            Print "buoy-releases verify CATALOG [--expect-releases N]"
+            Print "buoy-releases matrix CATALOG --profile compiler|sdk [--all-assets] [--output FILE]"
+            Return 0
+        End If
+        Need(Array.Count(args) >= 3, "command requires input filename or -")
+        Dim command As String = args(1)
+        Need(Contains(["ingest", "verify", "matrix"], command), "unknown command")
+        Dim repositoryName As String = "stretched-out-software/buoy-releases"
+        Dim expected As Integer = -1
+        Dim expectedPages As Integer = -1
+        Dim pageSize As Integer = 0
+        Dim profile As String = "sdk"
+        Dim output As String = ""
+        Dim allAssets As Boolean = False
+        For index As Integer = 3 To Array.Count(args) - 1
+            Dim optionName As String = args(index)
+            If Exact(optionName, "--all-assets") Then
+                Need(Exact(command, "matrix"), "--all-assets is only valid for matrix")
+                allAssets = True
+                Continue For
+            End If
+            Need(index + 1 < Array.Count(args), "missing option value")
+            Need(Contains(["--repository", "--expect-releases", "--expect-pages", "--page-size", "--profile", "--output"], optionName), "unknown option: " + optionName)
+            index += 1
+            Select Case optionName
+            Case "--repository"
+                Need(Exact(command, "ingest"), "--repository is only valid for ingest")
+                repositoryName = args(index)
+            Case "--expect-releases"
+                expected = CountArgument(args(index))
+            Case "--expect-pages"
+                Need(Exact(command, "ingest"), "--expect-pages is only valid for ingest")
+                expectedPages = CountArgument(args(index))
+            Case "--page-size"
+                Need(Exact(command, "ingest"), "--page-size is only valid for ingest")
+                pageSize = CountArgument(args(index))
+                Need(pageSize > 0 And pageSize <= 100, "GitHub API page size must be between 1 and 100")
+            Case "--profile"
+                Need(Exact(command, "matrix"), "--profile is only valid for matrix")
+                profile = args(index)
+            Case "--output"
+                Need(Not Exact(command, "verify"), "verify does not write an output file")
+                output = args(index)
+            Case Else
+                Throw New InvalidArgumentException("unknown option: " + optionName)
+            End Select
+        Next
+        If Exact(command, "ingest") Then
+            Dim catalog As JSONItem = Normalize(ParseInputs(ReadInput(args(2))), repositoryName, expected, expectedPages, pageSize)
+            Emit(catalog, output)
+            StdErr.WriteLine("Cataloged " + String.From(catalog.Value("source").Value("releaseCount").AsNumber().Value) + " releases and " + String.From(catalog.Value("source").Value("assetCount").AsNumber().Value) + " assets")
+        Else
+            Dim catalog As JSONItem = Verify(Json.Parse(ReadInput(args(2))), expected)
+            If Exact(command, "verify") Then
+                Print "Verified release catalog"
+            Else
+                Emit(Matrix(catalog, profile, allAssets), output)
+            End If
+        End If
+        Return 0
+    Catch problem As Exception
+        StdErr.WriteLine("buoy-releases: " + problem.Message)
+        Return 1
+    End Try
+End Function

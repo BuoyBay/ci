@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "runId": "replace-with-unique-validation-run",
+  "repositories": [
+    {
+      "name": "example-package",
+      "revision": "0000000000000000000000000000000000000000",
+      "visibility": "public",
+      "held": false,
+      "codeLicense": "MIT OR Apache-2.0",
+      "licenseApproved": true,
+      "checks": [
+        {"id": "linux/build", "host": "linux-x64", "kind": "build", "native": true},
+        {"id": "linux/behavior", "host": "linux-x64", "kind": "behavior", "native": true},
+        {"id": "macos/build", "host": "macos-arm64", "kind": "build", "native": true},
+        {"id": "macos/behavior", "host": "macos-arm64", "kind": "behavior", "native": true},
+        {"id": "windows/build", "host": "windows-x64", "kind": "build", "native": true},
+        {"id": "windows/behavior", "host": "windows-x64", "kind": "behavior", "native": true}
+      ]
+    },
+    {
+      "name": "held-package",
+      "revision": "0000000000000000000000000000000000000000",
+      "visibility": "private",
+      "held": true,
+      "codeLicense": "LicenseRef-Internal",
+      "licenseApproved": false,
+      "checks": [
+        {"id": "linux/build", "host": "linux-x64", "kind": "build", "native": true},
+        {"id": "linux/behavior", "host": "linux-x64", "kind": "behavior", "native": true}
+      ]
+    }
+  ]
+}

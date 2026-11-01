@@ -1,0 +1,18 @@
+# Image drivers construct minimal temporary contexts. This also keeps a manual
+# repository-root context limited to the public image sources.
+**
+!.dockerignore
+!images/
+!images/linux/
+!images/linux/Dockerfile
+!images/sdk/
+!images/sdk/Dockerfile
+!images/bin/
+!images/bin/buoy
+!images/bin/inspect-toolchain
+!images/bin/configure-compatibility
+!images/compatibility.json
+!catalog/
+!catalog/releases.json
+!scripts/
+!scripts/images.sh

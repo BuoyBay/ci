@@ -1,0 +1,244 @@
+' Validate native build receipts without running tests, Git, or publication commands.
+
+Private Function Exact(left As String, right As String) As Boolean
+    Return String.Compare(left, right, True) = 0
+End Function
+
+Private Function ReadObject(filePath As String) As JSONItem
+    Dim file As New FileSystemItem(filePath)
+    If Not file.IsFile() Or file.Length() > 67108864 Then Throw New IOException("Missing JSON input or input exceeds 64 MiB: " + filePath)
+    Dim text As Result Of String, String = file.ReadAllText()
+    If text.IsErr Then Throw New IOException("Cannot read " + filePath + ": " + text.Error)
+    Dim value As JSONItem = Json.Parse(text.Value)
+    If Not value.IsObject() Then Throw New InvalidArgumentException("Expected JSON object: " + filePath)
+    If Not value.Value("schema").IsNumber() Or value.Value("schema").AsNumber().Value <> 1.0 Then Throw New InvalidArgumentException("Expected schema 1: " + filePath)
+    Return value
+End Function
+
+Private Function Text(item As JSONItem, key As String) As String
+    Dim value As JSONItem = item.Value(key)
+    If Not value.IsString() Then Throw New InvalidArgumentException("Expected string: " + key)
+    Dim outputValue As String = value.AsString().Value
+    If outputValue = "" Then Throw New InvalidArgumentException("Empty string: " + key)
+    Return outputValue
+End Function
+
+Private Function Flag(item As JSONItem, key As String) As Boolean
+    If Not item.Value(key).IsBoolean() Then Throw New InvalidArgumentException("Expected boolean: " + key)
+    Return item.Value(key).AsBoolean().Value
+End Function
+
+Private Sub Identifier(value As String)
+    For i As Integer = 0 To String.Len(value) - 1
+        Dim character As String = String.Mid(value, i + 1, 1)
+        If Not String.Contains("abcdefghijklmnopqrstuvwxyz0123456789-._/", character, True) Then Throw New InvalidArgumentException("Invalid identifier: " + value)
+    Next
+    If String.Contains(value, "..", True) Then Throw New InvalidArgumentException("Invalid identifier: " + value)
+End Sub
+
+Private Sub Revision(value As String)
+    If String.Len(value) <> 40 And String.Len(value) <> 64 Then Throw New InvalidArgumentException("Expected complete lowercase Git revision")
+    Dim nonzero As Boolean = False
+    For i As Integer = 0 To String.Len(value) - 1
+        If Not String.Contains("0123456789abcdef", String.Mid(value, i + 1, 1), True) Then Throw New InvalidArgumentException("Invalid Git revision")
+        If String.Mid(value, i + 1, 1) <> "0" Then nonzero = True
+    Next
+    If Not nonzero Then Throw New InvalidArgumentException("Replace placeholder Git revision")
+End Sub
+
+Private Sub HostIdentifier(value As String)
+    Identifier(value)
+    For Each supported As String In ["linux-x64", "linux-arm64", "macos-x64", "macos-arm64", "windows-x64", "windows-arm64"]
+        If Exact(value, supported) Then Return
+    Next
+    Throw New InvalidArgumentException("Unknown native host: " + value)
+End Sub
+
+Private Sub Relative(value As String)
+    If String.Contains(value, "\\", True) Or String.Contains(value, ":", True) Then Throw New InvalidArgumentException("Evidence must use a relative portable path")
+    For Each part As String In String.Split(value, "/")
+        If part = "" Or part = "." Or part = ".." Then Throw New InvalidArgumentException("Unsafe evidence path")
+    Next
+End Sub
+
+Private Function CheckKey(repository As String, check As String) As String
+    Return repository + ":" + check
+End Function
+
+Private Function PlanChecks(plan As JSONItem) As Map Of String, JSONItem
+    Text(plan, "runId")
+    Dim repos As JSONItem = plan.Value("repositories")
+    If Not repos.IsArray() Or repos.Count() = 0 Then Throw New InvalidArgumentException("Plan requires repositories")
+    Dim names As New Map Of String, Boolean()
+    Dim checks As New Map Of String, JSONItem()
+    For i As Integer = 0 To repos.Count() - 1
+        Dim repo As JSONItem = repos.ValueAt(i)
+        Dim name As String = Text(repo, "name")
+        Identifier(name)
+        If String.Contains(name, "/", True) Then Throw New InvalidArgumentException("Repository name cannot contain slash")
+        If names.ContainsKey(name) Then Throw New InvalidArgumentException("Duplicate repository: " + name)
+        names.Set(name, True)
+        Revision(Text(repo, "revision"))
+        Dim visibility As String = Text(repo, "visibility")
+        If Not Exact(visibility, "public") And Not Exact(visibility, "private") Then Throw New InvalidArgumentException("Invalid visibility: " + name)
+        Dim held As Boolean = Flag(repo, "held")
+        If held And Not Exact(visibility, "private") Then Throw New InvalidArgumentException("Held repository must remain private: " + name)
+        Text(repo, "codeLicense")
+        Dim licenseApproved As Boolean = Flag(repo, "licenseApproved")
+        If Exact(visibility, "public") And Not licenseApproved Then Throw New InvalidArgumentException("Code license is not approved for publication: " + name)
+        Dim required As JSONItem = repo.Value("checks")
+        If Not required.IsArray() Or required.Count() = 0 Then Throw New InvalidArgumentException("No required checks: " + name)
+        Dim hasBuild As Boolean = False
+        Dim hasBehavior As Boolean = False
+        For j As Integer = 0 To required.Count() - 1
+            Dim requirement As JSONItem = required.ValueAt(j)
+            Dim id As String = Text(requirement, "id")
+            Identifier(id)
+            HostIdentifier(Text(requirement, "host"))
+            Dim kind As String = Text(requirement, "kind")
+            If Exact(kind, "build") Then
+                hasBuild = True
+            ElseIf Exact(kind, "behavior") Then
+                hasBehavior = True
+            Else
+                Throw New InvalidArgumentException("Check kind must be build or behavior")
+            End If
+            If Not Flag(requirement, "native") Then Throw New InvalidArgumentException("Publication checks require native execution")
+            Dim key As String = CheckKey(name, id)
+            If checks.ContainsKey(key) Then Throw New InvalidArgumentException("Duplicate required check: " + key)
+            Dim entry As JSONItem = JSONItem.NewObject()
+            entry.Value("repository") = name
+            entry.Value("revision") = Text(repo, "revision")
+            entry.Value("host") = Text(requirement, "host")
+            entry.Value("kind") = kind
+            checks.Set(key, entry)
+        Next
+        If Not hasBuild Or Not hasBehavior Then Throw New InvalidArgumentException("Each repository needs native build and behavior checks: " + name)
+    Next
+    Return checks
+End Function
+
+Private Function Gate(plan As JSONItem, reports As Array Of String) As JSONItem
+    Dim required As Map Of String, JSONItem = PlanChecks(plan)
+    Dim seen As New Map Of String, Boolean()
+    For Each filePath As String In reports
+        Dim report As JSONItem = ReadObject(filePath)
+        If Not Exact(Text(report, "runId"), Text(plan, "runId")) Then Throw New InvalidArgumentException("Stale or unrelated run: " + filePath)
+        Dim results As JSONItem = report.Value("results")
+        If Not results.IsArray() Or results.Count() = 0 Then Throw New InvalidArgumentException("Report requires results: " + filePath)
+        Dim reportFile As New FileSystemItem(filePath)
+        For i As Integer = 0 To results.Count() - 1
+            Dim item As JSONItem = results.ValueAt(i)
+            Dim repository As String = Text(item, "repository")
+            Dim check As String = Text(item, "check")
+            Identifier(repository)
+            Identifier(check)
+            Dim key As String = CheckKey(repository, check)
+            If Not required.ContainsKey(key) Then Throw New InvalidArgumentException("Unexpected check: " + key)
+            If seen.ContainsKey(key) Then Throw New InvalidArgumentException("Duplicate receipt: " + key)
+            seen.Set(key, True)
+            Dim expected As JSONItem = required.Get(key).Value
+            If Not Exact(Text(item, "revision"), Text(expected, "revision")) Then Throw New InvalidArgumentException("Source revision mismatch: " + key)
+            If Not Exact(Text(item, "host"), Text(expected, "host")) Then Throw New InvalidArgumentException("Native host mismatch: " + key)
+            If Not Flag(item, "native") Then Throw New InvalidArgumentException("Cross-check receipt is not native: " + key)
+            If Not Exact(Text(item, "status"), "passed") Then Throw New InvalidArgumentException("Required check did not pass: " + key)
+            If Not item.Value("exitCode").IsNumber() Or item.Value("exitCode").AsNumber().Value <> 0.0 Then Throw New InvalidArgumentException("Required check has nonzero exit code: " + key)
+            Dim command As JSONItem = item.Value("command")
+            If Not command.IsArray() Or command.Count() = 0 Then Throw New InvalidArgumentException("Missing observed command: " + key)
+            For j As Integer = 0 To command.Count() - 1
+                If Not command.ValueAt(j).IsString() Then Throw New InvalidArgumentException("Command arguments must be strings")
+            Next
+            Dim evidence As String = Text(item, "evidence")
+            Relative(evidence)
+            Dim file As FileSystemItem = reportFile.Parent.Child(evidence)
+            If Not file.IsFile() Or file.Length() = 0 Then Throw New IOException("Missing or empty evidence: " + key)
+        Next
+    Next
+    For Each key As String In required.Keys()
+        If Not seen.ContainsKey(key) Then Throw New InvalidArgumentException("Missing required check: " + key)
+    Next
+    Dim outputValue As JSONItem = JSONItem.NewObject()
+    outputValue.Value("schema") = 1
+    outputValue.Value("runId") = Text(plan, "runId")
+    outputValue.Value("status") = "passed"
+    outputValue.Value("checks") = seen.Count()
+    Dim publicRepos As JSONItem = JSONItem.NewArray()
+    Dim privateRepos As JSONItem = JSONItem.NewArray()
+    Dim repos As JSONItem = plan.Value("repositories")
+    For i As Integer = 0 To repos.Count() - 1
+        Dim repo As JSONItem = repos.ValueAt(i)
+        If Exact(Text(repo, "visibility"), "public") And Not Flag(repo, "held") Then
+            publicRepos.Add(Text(repo, "name"))
+        Else
+            privateRepos.Add(Text(repo, "name"))
+        End If
+    Next
+    outputValue.Value("publishable") = publicRepos
+    outputValue.Value("private") = privateRepos
+    Return outputValue
+End Function
+
+Private Function HostName() As String
+    Dim platform As String
+    #If TargetMac Then
+        platform = "macos"
+    #ElseIf TargetWindows Then
+        platform = "windows"
+    #Else
+        platform = "linux"
+    #End If
+    #If TargetArm Then
+        Return platform + "-arm64"
+    #Else
+        Return platform + "-x64"
+    #End If
+End Function
+
+Private Sub Preflight(profile As JSONItem)
+    If Not Exact(Text(profile, "host"), HostName()) Then Throw New InvalidArgumentException("This process is " + HostName() + ", not the configured native host")
+    For Each field As String In ["compiler", "packager"]
+        Dim file As New FileSystemItem(Text(profile, field))
+        If Not file.IsFile() Then Throw New IOException("Required executable file missing: " + field)
+    Next
+    For Each field As String In ["packages", "privateTests"]
+        Dim folder As New FileSystemItem(Text(profile, field))
+        If Not folder.IsFolder() Then Throw New IOException("Required input directory missing: " + field)
+    Next
+    Dim outputValue As JSONItem = JSONItem.NewObject()
+    outputValue.Value("schema") = 1
+    outputValue.Value("status") = "passed"
+    outputValue.Value("host") = HostName()
+    Print Json.Stringify(outputValue)
+End Sub
+
+Function Main(args As Array Of String) As Integer
+    Try
+        If args.Count = 2 And Exact(args(1), "host") Then
+            Print HostName()
+            Return 0
+        End If
+        If args.Count = 3 And Exact(args(1), "preflight") Then
+            Preflight(ReadObject(args(2)))
+            Return 0
+        End If
+        If args.Count = 3 And Exact(args(1), "manifest") Then
+            Dim plan As JSONItem = ReadObject(args(2))
+            Dim checks As Map Of String, JSONItem = PlanChecks(plan)
+            Print "Validated " + String.From(checks.Count()) + " required native checks"
+            Return 0
+        End If
+        If args.Count >= 4 And Exact(args(1), "gate") Then
+            Dim paths As Array Of String = []
+            For i As Integer = 3 To args.Count - 1
+                Array.Append(paths, args(i))
+            Next
+            Print Json.Stringify(Gate(ReadObject(args(2)), paths))
+            Return 0
+        End If
+        StdErr.WriteLine("usage: buoy-ci host | preflight PROFILE | manifest PLAN | gate PLAN REPORT...")
+        Return 2
+    Catch ex As Exception
+        StdErr.WriteLine("buoy-ci: " + ex.Message)
+        Return 1
+    End Try
+End Function

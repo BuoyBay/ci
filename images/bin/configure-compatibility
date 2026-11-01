@@ -1,0 +1,38 @@
+#!/bin/sh
+# Relocate SDK-owned files for checksum-selected historical package layouts.
+set -eu
+producer_root=${1-}
+arch=${2-}
+if [ -z "$producer_root" ]; then exit 0; fi
+case "$producer_root" in
+    /home/*/actions-runner/_work/*) ;;
+    *) printf 'Unsupported historical producer prefix.\n' >&2; exit 2 ;;
+esac
+case "$producer_root" in
+    *'/../'*|*'/./'*|*'//'*) printf 'Noncanonical producer prefix.\n' >&2; exit 2 ;;
+esac
+case "$arch" in
+    amd64) triple=x86_64-unknown-linux-gnu ;;
+    arm64) triple=aarch64-unknown-linux-gnu ;;
+    *) printf 'Unsupported SDK architecture.\n' >&2; exit 2 ;;
+esac
+test -f "/usr/lib/buoy/crt/$triple/crt0.o"
+mkdir -p "$producer_root/lib" "$producer_root/build/runtime"
+if [ -e "$producer_root/lib/crt" ] || [ -L "$producer_root/lib/crt" ]; then
+    test "$(readlink "$producer_root/lib/crt")" = /usr/lib/buoy/crt
+else
+    ln -s /usr/lib/buoy/crt "$producer_root/lib/crt"
+fi
+for library in /usr/lib/buoy/libbuoy_*.a; do
+    test -f "$library" || continue
+    name=$(basename "$library" .a)
+    alias="$producer_root/build/runtime/$name-$triple.a"
+    if [ -e "$alias" ] || [ -L "$alias" ]; then
+        test "$(readlink "$alias")" = "$library"
+    else
+        ln -s "$library" "$alias"
+    fi
+done
+mkdir -p /usr/local/share/buoy-ci
+printf '%s\n' "$producer_root" > /usr/local/share/buoy-ci/producer-prefix
+printf '1\n' > /usr/local/share/buoy-ci/auto-startup-object

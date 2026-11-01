@@ -1,0 +1,64 @@
+#!/bin/sh
+# Preserve the upstream executable and apply only the image's verified link mode.
+set -eu
+case "${1-}" in
+    ai)
+        if [ -x /usr/share/buoy/buoy ]; then exec /usr/share/buoy/buoy "$@"; fi
+        exec /usr/bin/buoy "$@" ;;
+    pkg|--help|--version) exec /usr/bin/buoy "$@" ;;
+esac
+mode=$(cat /usr/local/share/buoy-ci/link-mode)
+if [ "$mode" = plain ]; then exec /usr/bin/buoy "$@"; fi
+case "$(uname -m)" in
+    x86_64) target=x86_64-linux ;;
+    aarch64|arm64) target=arm64-linux ;;
+    *) exec /usr/bin/buoy "$@" ;;
+esac
+has_stubs=false
+has_crt=false
+expect_target=false
+expect_extra=false
+link_executable=true
+for arg do
+    if "$expect_target"; then target=$arg; expect_target=false; fi
+    if "$expect_extra"; then
+        case "$arg" in crt0.o|*/crt0.o) has_crt=true ;; esac
+        expect_extra=false
+    fi
+    case "$arg" in
+        --target) expect_target=true ;;
+        --target=*) target=${arg#--target=} ;;
+        --stubs-dir|--stubs-dir=*) has_stubs=true ;;
+        --extra-obj) expect_extra=true ;;
+        --extra-obj=*) case "${arg#--extra-obj=}" in crt0.o|*/crt0.o) has_crt=true ;; esac ;;
+        --library|--xcframework|--check) link_executable=false ;;
+    esac
+done
+case "$target" in
+    x86_64-linux) triple=x86_64-unknown-linux-gnu ;;
+    arm64-linux) triple=aarch64-unknown-linux-gnu ;;
+    x86_64-windows|x86_64-pc-windows) triple=x86_64-pc-windows-msvc ;;
+    arm64-windows|arm64-pc-windows) triple=arm64-pc-windows-msvc ;;
+    x86_64-darwin) triple=x86_64-apple-macos ;;
+    arm64-darwin) triple=arm64-apple-macos ;;
+    *) exec /usr/bin/buoy "$@" ;;
+esac
+if [ -d "/usr/lib/buoy/runtime/$triple" ]; then
+    set -- "-L/usr/lib/buoy/runtime/$triple" "$@"
+fi
+if ! "$has_stubs"; then
+    stubs=$triple
+    if [ "$target" = arm64-linux ] && [ -d /usr/lib/buoy/stubs/arm64-unknown-linux-gnu ]; then
+        stubs=arm64-unknown-linux-gnu
+    fi
+    if [ -d "/usr/lib/buoy/stubs/$stubs" ]; then
+        set -- --stubs-dir "/usr/lib/buoy/stubs/$stubs" "$@"
+    fi
+fi
+case "$target" in
+    *-linux)
+        if "$link_executable" && ! "$has_crt" && [ "$mode" != linux-sdk-auto-crt ] && [ -f "/usr/lib/buoy/crt/$triple/crt0.o" ]; then
+            set -- --extra-obj "/usr/lib/buoy/crt/$triple/crt0.o" "$@"
+        fi ;;
+esac
+exec /usr/bin/buoy "$@"

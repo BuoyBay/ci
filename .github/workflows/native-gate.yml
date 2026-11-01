@@ -1,0 +1,60 @@
+name: Native build and publication gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine_repository:
+        description: Engine repository; empty uses this repository
+        type: string
+        required: false
+      engine_ref:
+        description: Full engine commit; empty uses this dispatch commit
+        type: string
+        required: false
+  workflow_call:
+    inputs:
+      engine_repository:
+        description: Repository containing the reusable engine
+        type: string
+        required: true
+      engine_ref:
+        description: Full immutable engine commit
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-validation
+  cancel-in-progress: false
+
+jobs:
+  private-validation:
+    # Reusable calls inherit the caller event. Pull requests and branch pushes
+    # cannot reach this privileged, private-test coordinator.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: [self-hosted, Linux, X64, buoy-ci-coordinator]
+    timeout-minutes: 120
+    steps:
+      - name: Require an immutable engine commit
+        shell: bash
+        env:
+          ENGINE_REF: ${{ inputs.engine_ref || github.sha }}
+        run: |
+          if [[ ! "$ENGINE_REF" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
+            printf 'engine_ref must be a full lowercase Git commit.\n' >&2
+            exit 1
+          fi
+      - name: Check out trusted coordinator source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ${{ inputs.engine_repository || github.repository }}
+          ref: ${{ inputs.engine_ref || github.sha }}
+          path: engine
+          persist-credentials: false
+      - name: Build and run private native validation
+        shell: bash
+        run: ./engine/scripts/run-private.sh

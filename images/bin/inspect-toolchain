@@ -1,0 +1,49 @@
+#!/bin/sh
+# Operational verification of the image's compiler and its selected link mode.
+set -eu
+expected=${1-}
+version=$(/usr/bin/buoy --version)
+printf '%s\n' "$version"
+if [ -n "$expected" ]; then
+    actual=$(printf '%s\n' "$version" | tr '[:space:]' '\n' | grep -E '^[0-9]+([.][0-9]+){1,2}(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?$' | head -n 1)
+    if [ "$actual" != "$expected" ]; then
+        printf 'Version mismatch: expected %s; reported %s.\n' "$expected" "$actual" >&2
+        exit 1
+    fi
+fi
+test -x /usr/bin/buoy
+mkdir -p /usr/local/share/buoy-ci
+if [ -d /usr/share/buoy/ai ] && [ ! -e /usr/share/buoy/buoy ]; then
+    ln /usr/bin/buoy /usr/share/buoy/buoy
+fi
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT HUP INT TERM
+cd "$work"
+cat > main.bui <<'BUI'
+Sub Main()
+    Print "buoy-image-ready"
+End Sub
+BUI
+printf 'plain\n' > /usr/local/share/buoy-ci/link-mode
+if /usr/bin/buoy main.bui -o bare > bare.log 2>&1 && [ "$(./bare)" = buoy-image-ready ]; then
+    printf 'plain\n' > /usr/local/share/buoy-ci/link-mode
+else
+    if [ -f /usr/local/share/buoy-ci/auto-startup-object ]; then
+        printf 'linux-sdk-auto-crt\n' > /usr/local/share/buoy-ci/link-mode
+    else
+        printf 'linux-sdk-overrides\n' > /usr/local/share/buoy-ci/link-mode
+    fi
+    if ! /usr/local/bin/buoy main.bui -o linked > linked.log 2>&1; then
+        cat bare.log linked.log >&2
+        exit 1
+    fi
+    test "$(./linked)" = buoy-image-ready
+fi
+/usr/local/bin/buoy main.bui --check
+/usr/local/bin/buoy main.bui -o deployed
+test "$(./deployed)" = buoy-image-ready
+printf 'int buoy_ci_extra(void) { return 42; }\n' > extra.c
+cc -c extra.c -o extra.o
+/usr/local/bin/buoy main.bui --extra-obj extra.o -o with-extra
+test "$(./with-extra)" = buoy-image-ready
+printf 'Buoy image compiler and native execution verified (%s).\n' "$(cat /usr/local/share/buoy-ci/link-mode)"

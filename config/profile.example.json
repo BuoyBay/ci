@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "host": "linux-x64",
+  "compiler": "/absolute/path/to/buoy",
+  "packager": "/absolute/path/to/native/buoy",
+  "packages": "/absolute/path/to/installed/packages",
+  "privateTests": "/absolute/path/to/private/suites"
+}

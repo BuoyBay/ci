@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "runId": "replace-with-the-plan-run-id",
+  "results": [
+    {
+      "repository": "example-package",
+      "revision": "0000000000000000000000000000000000000000",
+      "check": "linux/build",
+      "host": "linux-x64",
+      "native": true,
+      "status": "passed",
+      "exitCode": 0,
+      "command": ["/absolute/path/to/native-builder", "example-package"],
+      "evidence": "logs/example-package-build.log"
+    }
+  ]
+}
