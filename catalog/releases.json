@@ -3,12 +3,12 @@
   "source": {
     "repository": "stretched-out-software/buoy-releases",
     "api": "https://api.github.com/repos/stretched-out-software/buoy-releases/releases",
-    "releaseCount": 88,
-    "assetCount": 393,
-    "expectedReleaseCount": 88,
+    "releaseCount": 89,
+    "assetCount": 400,
+    "expectedReleaseCount": 89,
     "countVerified": true,
     "pageCounts": [
-      88
+      89
     ],
     "paginationVerified": true,
     "pageSize": 100,
@@ -5186,6 +5186,91 @@
         "arm64": "buoy_0.72.0-1_arm64.deb"
       },
       "preferredSdk": "buoy_0.72.0-1_amd64.deb",
+      "linuxCompilerAvailable": true
+    },
+    {
+      "release": "buoy-v0.73.0",
+      "version": "0.73.0",
+      "imageTag": "buoy-v0.73.0",
+      "publishedAt": "2026-11-02T04:01:39Z",
+      "draft": false,
+      "prerelease": false,
+      "assets": [
+        {
+          "name": "buoy-0.73.0-1.x86_64.rpm",
+          "url": "https://github.com/stretched-out-software/buoy-releases/releases/download/buoy-v0.73.0/buoy-0.73.0-1.x86_64.rpm",
+          "sha256": "dd23de0e9a33c424f13a337d1439798c01a7e1cf143f1b3aba035f089b9fa3d6",
+          "size": 193070970,
+          "format": "rpm",
+          "os": "linux",
+          "arch": "amd64",
+          "classification": "filename-derived"
+        },
+        {
+          "name": "buoy-0.73.0-windows-arm64-setup.exe",
+          "url": "https://github.com/stretched-out-software/buoy-releases/releases/download/buoy-v0.73.0/buoy-0.73.0-windows-arm64-setup.exe",
+          "sha256": "f2af2fe0120ff9f6f6a43810ad6fb449f4d596871cd7848a5f879587216cdfe9",
+          "size": 150549422,
+          "format": "exe",
+          "os": "windows",
+          "arch": "arm64",
+          "classification": "filename-derived"
+        },
+        {
+          "name": "buoy-0.73.0-windows-x86_64-setup.exe",
+          "url": "https://github.com/stretched-out-software/buoy-releases/releases/download/buoy-v0.73.0/buoy-0.73.0-windows-x86_64-setup.exe",
+          "sha256": "4cc7270a91e3675a7667fc49fc3046548d906cc688c4ccc3f11fdc50e473ec87",
+          "size": 155782568,
+          "format": "exe",
+          "os": "windows",
+          "arch": "amd64",
+          "classification": "filename-derived"
+        },
+        {
+          "name": "buoy-debug-stubs-v0.73.0.zip",
+          "url": "https://github.com/stretched-out-software/buoy-releases/releases/download/buoy-v0.73.0/buoy-debug-stubs-v0.73.0.zip",
+          "sha256": "469068534475b92765b60166e92e86038583b16fb9c68ffbb244706c5527546a",
+          "size": 7780190,
+          "format": "zip",
+          "os": "unknown",
+          "arch": "unknown",
+          "classification": "filename-derived"
+        },
+        {
+          "name": "buoy_0.73.0-1_amd64.deb",
+          "url": "https://github.com/stretched-out-software/buoy-releases/releases/download/buoy-v0.73.0/buoy_0.73.0-1_amd64.deb",
+          "sha256": "c26a03148dbdc272f056fafb7f2390d0412e368e491405fa64243377fc502afb",
+          "size": 173473100,
+          "format": "deb",
+          "os": "linux",
+          "arch": "amd64",
+          "classification": "filename-derived"
+        },
+        {
+          "name": "buoy_0.73.0_arm64.pkg",
+          "url": "https://github.com/stretched-out-software/buoy-releases/releases/download/buoy-v0.73.0/buoy_0.73.0_arm64.pkg",
+          "sha256": "724ee385143e3b1c5b0a894e5f67f03dd81c7d14b747f4104c5ebe87334a2d76",
+          "size": 289363501,
+          "format": "pkg",
+          "os": "macos",
+          "arch": "arm64",
+          "classification": "filename-derived"
+        },
+        {
+          "name": "buoy_0.73.0_x86_64.pkg",
+          "url": "https://github.com/stretched-out-software/buoy-releases/releases/download/buoy-v0.73.0/buoy_0.73.0_x86_64.pkg",
+          "sha256": "58eb97b93e99b275b03a91c4496d4971c3ee7e2857b9d7f75848c3f2d3cab7e3",
+          "size": 293534682,
+          "format": "pkg",
+          "os": "macos",
+          "arch": "amd64",
+          "classification": "filename-derived"
+        }
+      ],
+      "preferredLinux": {
+        "amd64": "buoy_0.73.0-1_amd64.deb"
+      },
+      "preferredSdk": "buoy_0.73.0-1_amd64.deb",
       "linuxCompilerAvailable": true
     }
   ]

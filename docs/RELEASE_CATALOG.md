@@ -4,13 +4,13 @@
 release metadata, retains every release and asset, verifies the supplied metadata,
 and produces image plans. The [image runner](RELEASE_IMAGES.md) uses those plans
 to download verified assets and build local images. Build the controller with
-Buoy 0.72 or a compatible current SDK; historical SDK images are separate
+Buoy 0.73 or a compatible current SDK; historical SDK images are separate
 subjects under test.
 
 ```sh
 mkdir -p local/releases-cli
 buoy src/releases.bui -o local/releases-cli/buoy-releases
-./local/releases-cli/buoy-releases verify catalog/releases.json --expect-releases 88
+./local/releases-cli/buoy-releases verify catalog/releases.json --expect-releases 89
 ```
 
 No Python, ProcessKit, or external package is needed by this executable. Its
@@ -24,15 +24,19 @@ metadata captured from the beginning of that repository's release history:
 
 | Item | Snapshot |
 | --- | --- |
-| Releases | 88 |
-| Assets | 393 |
+| Releases | 89 |
+| Assets | 400 |
 | Oldest release | `buoy-2026.06.19`, published June 20, 2026 |
-| Latest release | `buoy-v0.72.0` |
-| Assets by format | 65 DEB, 65 RPM, 66 EXE, 122 PKG, 22 DMG, 53 ZIP |
-| Supplied API pages | One page of 88, requested page size 100 |
-| Linux compiler plan | 65 Debian rows across 34 releases: 34 amd64 and 31 arm64 |
-| Default SDK carrier plan | 88 rows, one preferred asset for every release |
-| All-assets carrier plan | 393 rows |
+| Latest release | `buoy-v0.73.0` |
+| Assets by format | 66 DEB, 66 RPM, 68 EXE, 124 PKG, 22 DMG, 54 ZIP |
+| Supplied API pages | One page of 89, requested page size 100 |
+| Linux compiler plan | 66 Debian rows across 35 releases: 35 amd64 and 31 arm64 |
+| Default SDK carrier plan | 89 rows, one preferred asset for every release |
+| All-assets carrier plan | 400 rows |
+
+The 0.73.0 snapshot contains seven assets and no Linux ARM64 DEB/RPM. Its
+Linux compiler matrix therefore adds only an amd64 row; the macOS ARM64 PKG
+is available for native M4 installation.
 
 The dated first tag is preserved exactly and has `version: null`; a version is
 never invented from a date or asset filename. Release `buoy-v0.50.0` is Mac-only:
@@ -52,7 +56,7 @@ mkdir -p local/release-input
 gh api 'repos/stretched-out-software/buoy-releases/releases?per_page=100' \
   --paginate --slurp > local/release-input/pages.json
 ./local/releases-cli/buoy-releases ingest local/release-input/pages.json \
-  --expect-releases 88 --expect-pages 1 --page-size 100 \
+  --expect-releases 89 --expect-pages 1 --page-size 100 \
   --output catalog/releases.json
 ```
 

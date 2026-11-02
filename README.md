@@ -114,7 +114,7 @@ coordinate native Mac and Windows workers using the same receipt format.
 
 ## Historical SDK images
 
-The catalog covers 88 upstream releases and 393 assets. Shared Docker recipes
+The catalog covers 89 upstream releases and 400 assets. Shared Docker recipes
 build Linux compiler environments and SDK artifact carriers, verifying asset
 checksums before use. Carriers also preserve early Mac-only releases for
 extraction on native workers.

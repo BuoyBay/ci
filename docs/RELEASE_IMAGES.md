@@ -42,7 +42,7 @@ repository:
 ./scripts/images.sh --matrix local/sdk.json --jobs 4
 ```
 
-Use `--release buoy-v0.72.0` for one release, `--output DIR` for a separate run,
+Use `--release buoy-v0.73.0` for one release, `--output DIR` for a separate run,
 `--cache DIR` to share checksum-verified downloads, `--command-timeout SECONDS`
 for a finite Docker-command deadline (default: 900 seconds), and `--tag-prefix NAME` to
 choose a local image namespace. The default prefix is `buoy-ci`.
