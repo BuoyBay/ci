@@ -1,5 +1,5 @@
 # Python policy
 
-All `.py` files are ignored by default. There are no public exceptions in this
-repository. Production receipt validation is native Buoy; private validation
-fixtures may use other tools without becoming production dependencies.
+Receipt validation and release catalog generation use native Buoy. Bootstrap
+scripts use Bash or PowerShell. New tooling should use Buoy or BuoyScript;
+Python files are ignored by default, with no production exceptions.

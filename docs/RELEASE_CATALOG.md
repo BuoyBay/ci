@@ -73,12 +73,9 @@ be full, and the final page must be short. If the final nonempty page is full,
 include the next empty page to demonstrate termination. `--expect-pages` and
 `--expect-releases` must match the supplied capture exactly. Flattened release
 JSONL supports the release-count assertion but cannot claim page verification.
-The public snapshot was generated from the actual paginated API capture, not
-from a reconstructed pagination envelope.
-
 These checks validate the supplied capture's shape, counts, and origin fields;
-they are not an independent live-network census. Keep the raw response privately
-when maintaining the catalog. Output has no current-time generation stamp and is
+they are not an independent live-network census. Output has no current-time
+generation stamp and is
 ordered by publication timestamp and exact tag, with assets ordered by exact
 name, so repeating ingestion or reordering the same records is deterministic.
 

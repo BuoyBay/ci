@@ -35,7 +35,7 @@ inventory. The SDK matrix selects one preferred asset per release. Add
 ## Build locally
 
 The runner requires Bash, Docker Buildx, curl, jq, sha256sum, and GNU timeout (or gtimeout). Run from this
-repository; the generated contexts, asset cache, logs and receipts stay ignored:
+repository:
 
 ```sh
 ./scripts/images.sh --matrix local/compiler.json --arch amd64 --jobs 4
@@ -52,10 +52,8 @@ Cross-platform Buildx execution requires separately configured emulation. Keep
 native and emulated results distinct; setting `--platform` alone is not native
 execution evidence.
 
-The runner constructs a new minimal build context containing only the verified
-payload, catalog row and fixed helper scripts. It never sends this repository's
-Git metadata, private profiles, tests, receipts or credentials as image context.
-There is no registry-push operation.
+The runner constructs a minimal build context from the verified payload, catalog
+row and fixed helper scripts.
 
 ## Archive and verified tags
 
@@ -100,7 +98,6 @@ already-locked output. Each invocation writes `summary.json` for its selected ro
 Per-row receipts include the official asset/digest, local image IDs, archive IDs,
 recipe fingerprint, status, failure category, timestamps and log paths. Results
 from earlier runs in the same output directory cannot count as current passes.
-Private receipts and detailed logs are not part of the public repository.
 
 The default Debian base is pinned by manifest digest. Debian security packages
 are resolved at image-build time, so the records identify the resulting image;

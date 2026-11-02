@@ -1,81 +1,103 @@
 # Build Buoy projects and historical compiler images
 
-This reusable engine gives Linux, macOS and Windows validation a shared
-receipt format and a native publication gate. Build/test drivers and their suites
-remain outside Git. The gate requires actual native build and behavior receipts
-for the exact planned Git revisions; missing, failed, skipped, duplicated, stale
-or mismatched results fail closed. Each project's trusted plan controls its
-license approval, required checks, publication visibility and hold status.
+Validate native Linux, macOS and Windows builds against an exact Git revision,
+then evaluate their results with a shared publication gate. A project's plan
+sets its required checks, license approval, publication visibility and holds.
+Missing, failed, skipped, duplicated, stale or mismatched results fail the gate.
 
-The engine, workflow and templates are public source. Real test suites, evidence,
-host profiles, connection details and credentials stay private outside Git.
+Shared Docker recipes also build checksum-pinned compiler environments and SDK
+artifact carriers from the upstream release catalog.
 
-It does not push code, change repository visibility, deploy services, register
-runners or change desktop permissions.
+## Build the coordinator
 
-## Build and use
-
-Install Buoy, then compile the coordinator into its isolated local directory:
+Install Buoy, then run:
 
 ```sh
 ./scripts/build.sh
 ./local/bin/buoy-ci host
-./local/bin/buoy-ci preflight /absolute/path/to/private/profile.json
-./local/bin/buoy-ci manifest /absolute/path/to/private/plan.json
-./local/bin/buoy-ci gate /absolute/path/to/private/plan.json /absolute/path/to/private/report.json
 ```
 
-Set `BUOY_COMPILER` to an executable path when it is not on `PATH`. Windows can
-use `./scripts/build.ps1` and `local/bin/buoy-ci.exe`. The coordinator uses only
-Buoy's built-in JSON/filesystem facilities; no Python or SDK packages are needed.
-The Windows bootstrap copies matching runtime DLLs from the compiler install and
-runs the resulting executable. Set `BUOY_RUNTIME_DIR` explicitly for a custom SDK
-layout; an absent runtime is a build failure rather than a successful unusable
-output.
+Set `BUOY_COMPILER` to an executable path when it is not on `PATH`. Windows uses
+`./scripts/build.ps1` and `local/bin/buoy-ci.exe`. The Windows bootstrap deploys
+matching runtime DLLs from the compiler installation; `BUOY_RUNTIME_DIR` selects
+a custom SDK runtime directory.
 
-Copy the files in [config/](config/) into ignored `local/` or another private
-directory. Replace the example zero revisions and run ID before use. Set each
-repository's real `codeLicense` and explicitly approve it with `licenseApproved`
-only after the project owner has decided its publication terms. A public
-repository cannot be held or have an unapproved license. The engine does not
-infer permission from a project name or interpret custom license text. A native
-host profile names installed compiler/packager files, SDK packages and private
-suite directories. Preflight checks the local native host and configured paths.
-It does not establish compiler provenance or execute the test suite.
+The coordinator uses Buoy's built-in JSON and filesystem facilities.
 
-Plan names/check IDs use canonical lowercase identifiers (`a-z`, digits, `-`,
-`_`, `.`, `/`); repository names omit `/`. Use complete lowercase Git object IDs.
-The private collector associates these receipt IDs with actual source checkouts.
+## Configure a project
 
-## Run private suites
+Start with the included templates:
 
-Configure `BUOY_CI_PLAN`, `BUOY_CI_PROFILE`, `BUOY_PRIVATE_DRIVER` and
-`BUOY_CI_REPORTS_DIR` as absolute paths, then invoke `./scripts/run-private.sh`.
-The output directory must be new. The operator-owned driver receives exactly
-`PLAN_PATH REPORT_DIRECTORY`; it may coordinate authorized native hosts and must
-write report bundles with relative, nonempty evidence files. A nonzero driver
-exit stops the run before gate evaluation. The wrapper captures each stage's
-output and full gate result in hidden `.ci-*` files inside the private evidence
-directory. It prints only a generic pass/fail status, so private suite output
-does not enter public Actions logs. Nothing is uploaded automatically.
+```sh
+mkdir -p local
+cp config/profile.example.json local/profile.json
+cp config/plan.example.json local/plan.json
+cp config/report.example.json local/report.json
+```
 
-The trusted driver must check the source revision and clean tree before building,
-record actual command exits and native host identity, and retain compiler/runtime
-versions, source/artifact hashes and logs. Gate receipts are trusted collector
-claims, not cryptographic attestations. A pass authorizes no external action by
-itself; publication remains a separate explicit operation after all required
-results and project holds are reviewed.
+Update the profile with your native host, compiler, packager and SDK paths.
+The `privateTests` field names the directory containing your test suites.
+Preflight checks the host and configured paths:
 
-## CI runner boundary
+```sh
+./local/bin/buoy-ci preflight "$PWD/local/profile.json"
+```
 
-[The workflow](.github/workflows/native-gate.yml) runs only a trusted manual
-default-branch dispatch on an operator-provisioned coordinator. Reusable calls
-must originate from that same trusted dispatch context. Pull requests cannot run
-private suites on privileged hosts. Runner installation, host profiles, SSH trust,
-secrets and desktop access are provisioned separately. No schedules are enabled.
+Replace the plan's sample repositories, zero revisions and run ID. Set each
+repository's `codeLicense`, `licenseApproved`, visibility, hold state and required
+checks. Public releases require an approved license and no active hold.
 
-Other organizations and forks can reuse the engine without source changes. Pin
-the same immutable engine commit in the reusable workflow reference and checkout:
+Use canonical lowercase plan names and check IDs (`a-z`, digits, `-`, `_`, `.`,
+`/`); repository names omit `/`. Revisions must be complete lowercase Git object
+IDs. Review the selected check matrix with:
+
+```sh
+./local/bin/buoy-ci manifest "$PWD/local/plan.json"
+```
+
+The report template illustrates one check result. Produce a result for every
+planned check, using the plan's run ID, repository revision and host identity.
+Each result records the command, exit status and a relative path to a nonempty
+supporting file. Evaluate the reports with:
+
+```sh
+./local/bin/buoy-ci gate "$PWD/local/plan.json" "$PWD/local/report.json"
+```
+
+## Run your build driver
+
+Set these environment variables to absolute paths:
+
+| Variable | Value |
+| --- | --- |
+| `BUOY_CI_PLAN` | Your project plan |
+| `BUOY_CI_PROFILE` | Your native-host profile |
+| `BUOY_PRIVATE_DRIVER` | Your executable build and test driver |
+| `BUOY_CI_REPORTS_DIR` | A new output directory for this run |
+
+Then run `./scripts/run-private.sh`. The wrapper builds the coordinator, checks
+preflight and plan inputs, invokes your driver, and evaluates its JSON reports.
+The driver receives exactly `PLAN_PATH REPORT_DIRECTORY` and writes report
+bundles as `*.json` in that directory. A nonzero driver exit fails the run.
+
+The driver checks the source revision and clean tree before building, records
+actual commands and native host identity, and retains compiler/runtime versions,
+source/artifact hashes and logs. Gate receipts represent the collector's results;
+the gate validates their consistency rather than authenticating those claims.
+
+Stage output and the complete gate result are saved in `.ci-*` files in the
+output directory. The Actions log receives a concise pass/fail status. A passing
+gate is an input to your release process; publication is a separate step.
+
+## Use GitHub Actions
+
+[The workflow](.github/workflows/native-gate.yml) runs on a self-hosted Linux x64
+coordinator labeled `buoy-ci-coordinator`. Configure the environment variables
+above on that runner. Jobs accept default-branch manual dispatches; reusable
+calls must originate from the same dispatch context.
+
+Pin the same immutable engine commit in the reusable workflow reference and
+checkout:
 
 ```yaml
 on: workflow_dispatch
@@ -87,20 +109,15 @@ jobs:
       engine_ref: FULL_COMMIT_SHA
 ```
 
-The caller must configure the `buoy-ci-coordinator` self-hosted runner label and
-its private environment. Runner-group access remains the operator's boundary;
-this workflow does not grant other repositories access to a runner.
-
-The workflow definition is scaffolding; a hosted GitHub run is not claimed.
-Private Mac/Windows workers can use the same native receipt validator, with their
-own isolated build directories and authorized existing desktop sessions.
+Configure runner-group access for the calling repositories. Your driver can
+coordinate native Mac and Windows workers using the same receipt format.
 
 ## Historical SDK images
 
-A native catalog tool covers all 88 upstream releases and their 393 assets. Shared
-Docker recipes build Linux compiler environments and SDK artifact carriers, with
-asset checksums verified before use. The carrier profile also preserves early
-Mac-only releases for extraction on native workers.
+The catalog covers 88 upstream releases and 393 assets. Shared Docker recipes
+build Linux compiler environments and SDK artifact carriers, verifying asset
+checksums before use. Carriers also preserve early Mac-only releases for
+extraction on native workers.
 
 ```sh
 mkdir -p local/releases-cli
@@ -112,14 +129,12 @@ buoy src/releases.bui -o local/releases-cli/buoy-releases
 
 See [image recipes and usage](docs/RELEASE_IMAGES.md) and
 [catalog maintenance](docs/RELEASE_CATALOG.md). Archived SDK identity, actual
-compiler behavior, and strict release-version verification are separate results.
-Expired SDKs and upstream version mismatches remain explicit. Images stay local;
-there is no registry-push operation. The upstream SDK retains its own license.
+compiler behavior and strict release-version verification are separate results.
+Expired SDKs and upstream version mismatches remain explicit. The upstream SDK
+retains its own license.
 
 ## Local AI setup
 
-On your own machine, run `buoy ai init --both` after cloning. Generated agent
-instructions, documentation indexes and editor settings remain local and ignored.
+On your own machine, run `buoy ai init --both` after cloning.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [LICENSING.md](LICENSING.md) and
-[PYTHON.md](PYTHON.md) for contribution, license and dependency policies.
+[Contributing](CONTRIBUTING.md) · [Licensing](LICENSING.md) · [Python policy](PYTHON.md)
