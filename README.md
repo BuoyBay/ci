@@ -133,8 +133,4 @@ compiler behavior and strict release-version verification are separate results.
 Expired SDKs and upstream version mismatches remain explicit. The upstream SDK
 retains its own license.
 
-## Local AI setup
-
-On your own machine, run `buoy ai init --both` after cloning.
-
 [Contributing](CONTRIBUTING.md) · [Licensing](LICENSING.md) · [Python policy](PYTHON.md)
