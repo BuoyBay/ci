@@ -1,4 +1,4 @@
-# Reusable CI, native build gates, and checksum-verified historical SDK Docker recipes
+# CI, native build gates, checksummed historical SDK images
 
 Validate native Linux, macOS and Windows builds against an exact Git revision,
 then evaluate their results with a shared publication gate. A project's plan
