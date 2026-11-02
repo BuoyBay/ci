@@ -105,6 +105,6 @@ the project does not claim every rebuild is byte-for-byte identical.
 
 Repository licenses cover our original scripts and recipes. Buoy compiler, SDK
 and runtime components retain their [upstream terms](https://github.com/stretched-out-software/buoy-releases/blob/main/LICENSE.md),
-and local images preserve their notices. These commands build local images and
-do not publish them to a registry. The CI repository's permissive source license
+and local images preserve their notices. These commands build local images.
+The CI repository's permissive source license
 does not grant redistribution rights to the embedded SDK.

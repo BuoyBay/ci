@@ -1,4 +1,4 @@
-# Build Buoy projects and historical compiler images
+# Reusable CI, native build gates, and checksum-verified historical SDK Docker recipes
 
 Validate native Linux, macOS and Windows builds against an exact Git revision,
 then evaluate their results with a shared publication gate. A project's plan

@@ -2,9 +2,10 @@
 
 `src/releases.bui` is the native, offline catalog tool. It reads captured GitHub
 release metadata, retains every release and asset, verifies the supplied metadata,
-and produces image plans. It does not download assets, run compilers in images,
-contact a registry, or publish images. Build the controller with Buoy 0.72 or a
-compatible current SDK; historical SDK images are separate subjects under test.
+and produces image plans. The [image runner](RELEASE_IMAGES.md) uses those plans
+to download verified assets and build local images. Build the controller with
+Buoy 0.72 or a compatible current SDK; historical SDK images are separate
+subjects under test.
 
 ```sh
 mkdir -p local/releases-cli
@@ -159,5 +160,4 @@ hide such a result.
 
 The catalog and this repository's license do not grant redistribution rights to
 SDK binaries or their third-party dependencies. Review upstream SDK terms and
-bundled notices before publishing cached or derived images. This tool performs
-no image or registry push.
+bundled notices before publishing cached or derived images.
